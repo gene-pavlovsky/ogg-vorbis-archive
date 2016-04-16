@@ -1,0 +1,574 @@
+# copyright 2003-2005 Gene Pavlovsky <gene.pavlovsky@gmail.com>
+#
+# this is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# -*- sh -*-
+#
+# global: shell functions shared by ova programs.
+
+exec 3<&0 4>&2
+if test "$(echo $0 | sed 's/.*bash//')"; then
+  data_dir="@datadir@"
+  if test "${data_dir:0:1}" != "@"; then
+    test "$enable_debug" = yes && exec 2>"@datadir@/log/error/$(basename "$0").$$" ||
+      exec 2>/dev/null
+  fi
+  unset data_dir
+fi
+
+# if debugging is on, delete the error log file if it's empty
+# args: none
+cleanup_errorlog()
+{
+  declare debug_filename data_dir
+  if test "$enable_debug" = yes; then
+    data_dir="@datadir@"
+    if test "${data_dir:0:1}" != "@"; then
+      debug_filename="@datadir@/log/error/$(basename "$0").$$"
+      test -f $debug_filename -a ! -s $debug_filename && rm -f $debug_filename
+    fi
+  fi
+}
+
+# displays questioning prompt, reads result (provides default value)
+# args: $1 - prompt; $2 - variable name; $3 - default value
+ask()
+{
+  show_cursor 1 >&4
+  if test -z "$3"; then
+    read -e -p "$1? " $2 2>&4 <&3
+  else
+    read -e -p "$1 ($3)? " $2 2>&4 <&3
+    test -z "${!2}" && eval $2='$3'
+  fi
+  hide_cursor 1 >&4
+}
+
+# "press enter" prompt
+# args: none
+kbd_confirm()
+{
+  echo
+  echo -n "press enter to continue... "
+  show_cursor 1 >&4
+  read 2>&4 <&3
+  hide_cursor 1 >&4
+}
+
+# show cursor, call readdef, hide cursor
+# args: same as readdef
+readdef()
+{
+  show_cursor 1 >&4
+  command readdef "$@" 2>&4 <&3
+  hide_cursor 1 >&4
+}
+
+# set default minimum heartbeat cycle if unset
+test -z "$heartbeat_rate" && heartbeat_rate=80
+heartbeat_cycle="$((10000000/heartbeat_rate))"
+
+# strip leading and trailing spaces from the variables.
+# args: $@ - variable names list
+stripspaces()
+{
+  declare tmp
+  while test $# -gt 0; do
+    tmp=$(echo "${!1}" | sed -e 's/^ *//' -e 's/ *$//')
+    eval $1='$tmp'
+    shift
+  done
+}
+
+# strip pairs of outermost round/square brackets from the variables
+# args: $@ - variable names list
+stripbrackets()
+{
+  declare tmp
+  while test $# -gt 0; do
+    tmp=$(echo "${!1}" | sed 's/^ *\[\(.*\)] *$\|^ *(\(.*\)) *$/\1\2/')
+    eval $1='$tmp'
+    shift
+  done
+}
+
+# convert underscores to spaces in the variables
+# args: $@ - variable names list
+conv_uscores2spaces()
+{
+  while test $# -gt 0; do
+    tmp=$(echo "${!1}" | sed 'y/_/ /')
+    eval $1='$tmp'
+    shift
+  done
+}
+
+# convert spaces to underscores in the variables
+# args: $@ - variable names list
+conv_spaces2uscores()
+{
+  declare tmp
+  while test $# -gt 0; do
+    tmp=$(echo "${!1}" | sed 'y/ /_/')
+    eval $1='$tmp'
+    shift
+  done
+}
+
+# convert the variables to lower case
+# args: $@ - variable names list
+conv_2lcase()
+{
+  declare tmp
+  while test $# -gt 0; do
+    tmp=$(echo "${!1}" | dd conv=lcase 2>/dev/null)
+    eval $1='$tmp'
+    shift
+  done
+}
+
+# check if the argument is a number (suitable for use in integer operations of "test")
+# args: $1 - string to test
+isint()
+{
+  test $# -eq 0 && return 1
+  while test $# -gt 0; do
+    test "$1" -eq 0 2>/dev/null
+    test $? -eq 2 && return 1
+    shift
+  done
+  return 0
+}
+
+# returns file's playback length
+# args: $1 - file name; $2 - if set, tag file is used if present
+get_playlength()
+{
+  declare text ext tag_file hours mins secs msecs
+  playlength=0
+  test -f "$1" || return 1
+  ext="$(echo "$1" | sed 's/.*\.\([^.]*\)\|.*/\1/')"
+  tag_file="$(echo "$1" | sed 's/\.[^.]*$/.tag~/')"
+  if test "$2" -a -f "$tag_file"; then
+    playlength=$(grep '^playlength=' "$tag_file" | sed 's/^playlength=//')
+    isint "$playlength" && return 0
+  fi
+  case "$ext" in
+    mp3)
+      text=$(mp3info -m "$1" 2>/dev/null | grep "^Length:" |
+        sed 's/^Length: *\(.*\) */\1/')
+      test "$text" || return 1
+      hours=10#$(echo "$text" | cut -d: -f1)
+      mins=10#$(echo "$text" | cut -d: -f2)
+      secs=10#$(echo "$text" | cut -d: -f3 | cut -d. -f1)
+      msecs=10#$(echo "$text" | cut -d. -f2)
+    ;;
+    ogg)
+      text=$(ogginfo "$1" 2>/dev/null| grep "^[[:blank:]]*Playback length:" |
+        sed 's/^[[:blank:]]*Playback length: *\(.*\) */\1/')
+      test "$text" || return 1
+      hours=0
+      mins=10#$(echo "$text" | cut -dm -f1)
+      secs=10#$(echo "$text" | cut -d: -f2 | cut -d. -f1)
+      msecs=10#$(echo "$text" | cut -d. -f2 | cut -ds -f1)
+    ;;
+    wav)
+      text=$(sfinfo "$1" 2>/dev/null| grep "^Duration" |
+        sed 's/^Duration[[:blank:]]*\([^ ]*\).*/\1/')
+      test "$text" || return 1
+      hours=0
+      mins=0
+      secs=10#$(echo "$text" | cut -d. -f1)
+      msecs=10#$(echo "$text" | cut -d. -f2)
+    ;;
+    raw)
+      text=$(stat -c %s "$1" 2>/dev/null)
+      test "$text" || return 1
+      hours=0
+      mins=0
+      secs=10#$((text/176400))
+      msecs=10#$(((text%176400)*10/1764))
+    ;;
+    *)
+      echo "File: '$1'" >&4
+      echo "Unsupported media file extension: ${ext:-''}" >&4
+      echo "Only the following file extensions are supported: mp3 ogg wav" >&4
+      echo "Sorry, no content-based file type auto-detection" >&4
+      exit 1
+    ;;
+  esac
+  let playlength=msecs+secs*1000+mins*60000+hours*3600000
+}
+
+# hides cursor
+# args: if any, checks cursor_should_hide variable, otherwise sets it to yes
+hide_cursor()
+{
+  if test $# -gt 0; then
+    test "$cursor_should_hide" = yes || return 0
+  else
+    cursor_should_hide=yes
+  fi
+  echo -ne "\033[?25l"
+}
+
+# shows cursor
+# args: if none, set cursor_should_hide variable to no, otherwise skip it
+show_cursor()
+{
+  test $# -eq 0 && cursor_should_hide=no
+  echo -ne "\033[?25h"
+}
+
+# clears screen
+# args: none
+clear_screen()
+{
+  echo -ne "\033[2J\033[1;1H"
+}
+
+# moves cursor
+# args: $1 - column; $2 - row
+move_cursor()
+{
+  echo -ne "\033[$2;$1H"
+}
+
+# writes the list of variable names and their values to the file
+# args: $1 - filename; $2 - quotation character; shift 2; $@ - variables
+outputvars()
+{
+  declare filename="$1" quote="$2"
+  shift 2
+  while test $# -gt 0; do
+    echo "$1=${quote}${!1}${quote}" | sed 's/  */ /g' >>"$filename"
+    shift
+  done
+}
+
+# checks if the value is in the colon-separated list
+# args: $1 - value; $2 - colon-separated list
+value_in_colonlist()
+{
+  declare old_IFS="$IFS" match=1 i
+  IFS=:
+  for i in $2; do
+    if test "$i" = "$1"; then
+      match=0
+      break
+    fi
+  done
+  IFS="$old_IFS"
+  return $match
+}
+
+# checks if the value matches a pattern in the colon-separated list
+# args: $1 - value; $2 - colon-separated pattern list
+value_matches_colonlist()
+{
+  declare old_IFS="$IFS" match=1 i
+  IFS=:
+  for i in $2; do
+    if test -z "$(echo "$1" | sed "s/$i//")"; then
+      match=0
+      break
+    fi
+  done
+  IFS="$old_IFS"
+  return $match
+}
+
+# resolve all . and .. in path, prepend working directory in case of relative path
+# args: $1 - absolute/relative path; $2 - working directory in case if $1 is relative
+canonizepath()
+{
+  declare input_path index=0 old_IFS="$IFS" i
+  declare -a path
+  test "${1:0:1}" = / && input_path="$1" || input_path="$2/$1"
+  IFS=/
+  for i in $input_path; do
+    if test "$i" = . -o -z "$i"; then
+      continue
+    elif test "$i" = ..; then
+      test $index -gt 0 && let --index
+    else
+      path[$index]="$i"
+      let ++index
+    fi
+  done
+  echo /"${path[*]}"
+  IFS="$old_IFS"
+}
+
+# print the part of the path that's relative to the given prefix (if it is)
+# args: $1 - path; $2 - path prefix
+stripprefix()
+{
+  declare pathlen=0 prefixlen=0 old_IFS="$IFS" i match
+  declare -a path prefix
+  IFS=/
+  for i in $1; do
+    path[$pathlen]="$i"
+    let ++pathlen
+  done
+  for i in $2; do
+    prefix[$prefixlen]="$i"
+    let ++prefixlen
+  done
+  IFS="$old_IFS"
+  if test $pathlen -lt $prefixlen; then
+    echo "$1"
+    return
+  fi
+  match=1
+  for ((i=0; i<prefixlen; ++i)); do
+    if test "${path[$i]}" != "${prefix[$i]}"; then
+      match=0
+      break
+    fi
+    unset path[$i]
+  done
+  if test $match -eq 1; then
+    IFS=/
+    test "${path[*]}" && echo "${path[*]}" || echo
+    IFS="$old_IFS"
+  else
+    echo "$1"
+  fi
+}
+
+# clears heartbeat-related variables
+# args: none
+heartbeat_init()
+{
+  heartbeat_number=1
+  heartbeat_direction=1
+  heartbeat_lastbeat_sec=
+  heartbeat_lastbeat_usec=
+}
+
+# displays a one-character heartbeat
+# args: none
+heartbeat()
+{
+  declare heartbeat_currenttime
+  test -z "$heartbeat_number" && heartbeat_init
+  heartbeat_currenttime_sec=$(gettimeofday -s)
+  heartbeat_currenttime_usec=$(gettimeofday -u)
+  if test "$heartbeat_lastbeat_sec"; then
+    heartbeat_diff=$((heartbeat_currenttime_usec-heartbeat_lastbeat_usec))
+    test $((heartbeat_currenttime_sec-heartbeat_lastbeat_sec)) -ge 1 &&
+      let heartbeat_diff+=1000000
+    test $heartbeat_diff -lt $heartbeat_cycle && return
+  fi
+  heartbeat_lastbeat_sec=$heartbeat_currenttime_sec
+  heartbeat_lastbeat_usec=$heartbeat_currenttime_usec
+  case $heartbeat_number in
+    1) echo -ne '.\b';;
+    2) echo -ne 'o\b';;
+    3) echo -ne '0\b';;
+    4) echo -ne 'O\b';;
+  esac >&4
+  if test $heartbeat_direction -eq 1; then
+    let ++heartbeat_number
+    if test $heartbeat_number -gt 4; then
+      let heartbeat_number-=2
+      heartbeat_direction=0
+    fi
+  else
+    let --heartbeat_number
+    if test $heartbeat_number -lt 1; then
+      let heartbeat_number+=2
+      heartbeat_direction=1
+    fi
+  fi
+}
+
+# print the singular/plural form of the noun in $1, depending on the number in $2.
+# Handles only the most simple plural form rules, doesn't cover any irregular nouns.
+# args: $1 - noun; $2 - number
+noun_form()
+{
+  if isint "$2"; then
+    if test $2 -eq 1 -o $2 -eq -1; then
+      echo "$1"
+    else
+      if echo "$1" | grep -e "o$" -e "s$" -e "z$" -e "x$" -e "sh$" -e "ch$" &>/dev/null; then
+        echo "$1es"
+      elif echo "$1" | grep -e "f$" &>/dev/null; then
+        echo "${1:0:${#1}-1}ves"
+      elif echo "$1" | grep -e "fe$" &>/dev/null; then
+        echo "${1:0:${#1}-2}ves"
+      elif echo "$1" | grep "[bcdfghjklmnpqrstvwxz]y$" &>/dev/null; then
+        echo "${1:0:${#1}-1}ies"
+      else
+        echo "$1s"
+      fi
+    fi
+  else
+    echo "$1"
+  fi
+}
+
+# print 'have'/'has', depending on the number in $1.
+# args: $1 -number
+verb_have_form()
+{
+  if isint "$1"; then
+    test $1 -eq 1 -o $1 -eq -1 && echo has || echo have
+  else
+    echo has
+  fi
+}
+
+# adds string to array, incrementing array count $1_count
+# args: $1 - array name; $2 - string to add
+array_add()
+{
+  declare cvar=$1_count
+  test -z "${!cvar}" && eval $cvar=0
+  eval "$1[${!cvar}]"='$2'
+  eval let ++$cvar
+}
+
+# adds/strips zeros to variable, up/down to given length
+# args: $1 - variable; $2 - desired length
+zeropad()
+{
+  declare tmp="$1" len=${#1}
+  while test $len -gt $2 -a "${tmp:0:1}" = 0; do
+    tmp="${tmp:1}"
+    let --len
+  done
+  while test $len -lt $2; do
+    tmp="0$tmp"
+    let ++len
+  done
+  echo "$tmp"
+}
+
+# adds/strips spaces to variable, up/down to given length
+# args: $1 - variable; $2 - desired length
+spacepad()
+{
+  declare old_IFS="$IFS" tmp="$1" len=${#1}
+  IFS=$'\n'
+  while test $len -gt $2 -a "${tmp:0:1}" = ' '; do
+    tmp="${tmp:1}"
+    let --len
+  done
+  while test $len -lt $2; do
+    tmp=" $tmp"
+    let ++len
+  done
+  echo "$tmp"
+  IFS="$old_IFS"
+}
+
+# locate a substring in a string, possibly skipping first several matches
+# args: $1 - string; $2 - substring; $3 - skip
+strstr()
+{
+  declare i=0 skip
+  isint "$3" && skip=$3 || skip=0
+  while test $i -le $((${#1}-${#2})); do
+    if test "${1:i:${#2}}" = "$2"; then
+      if test $skip -gt 0; then
+        let --skip
+        let ++i
+        continue
+      fi
+      echo $i
+      return 0
+    fi
+    let ++i
+  done
+  return 1
+}
+
+# calculates 'estimated total time' based on progress and elapsed time
+# args: $1 - progress in range from 0 to 1000; $2 - elapsed time in seconds
+estimated_total()
+{
+  isint "$1" "$2" && test $1 -gt 0 -a $2 -gt $progress_wait && echo $(($2*1000000/$1))
+  return 0
+}
+
+# print general options help
+# args: none
+general_help()
+{
+  echo
+  echo "Options:"
+  echo -e "      --help\t\t$1print this help, then exit"
+  echo -e "      --version\t\t$1print version number, then exit"
+}
+
+# loads global and user configuration files
+# args: $@ - list of configuration files
+load_config()
+{
+  declare i data_dir
+  for i in $@; do
+    test -f @sysconfdir@/$i && . @sysconfdir@/$i
+  done
+  if test "$HOME"; then
+    # source user global.conf if present, disable debug if it's disabled in user global.conf
+    if test -f $HOME/.ova/global.conf; then
+      . $HOME/.ova/global.conf
+      data_dir="@datadir@"
+      if test "${data_dir:0:1}" != "@"; then
+        if ! test "$enable_debug" = yes; then
+          exec 2>/dev/null
+          rm -f "@datadir@/log/error/$(basename "$0").$$"
+        fi
+      fi
+    fi
+    for i in $@; do
+      test -f $HOME/.ova/$i && . $HOME/.ova/$i
+    done
+  fi
+}
+
+# return absolute value of $1
+# args: $1 - value
+abs()
+{
+  test $1 -lt 0 && echo $((-$1)) || echo $1
+}
+
+# read entry from the CDDB, process it
+# args: $1 - CDDB entry; $2 - unprocessed file; $3 - processed file
+cddb_read_process()
+{
+  declare cddb_status lastleft= lastright= dirty=
+  echo -n "performing CDDB read... "
+  cddb_status=$("@bindir@/ova-cddb_read" $1 2>&1 >"$2")
+  if test "${cddb_status:7:3}" != 210; then
+    echo "failed: $cddb_status"
+    return 1
+  fi
+  echo -ne "done\nprocessing CDDB read results: "
+  rm -f "$3"
+  touch "$3"
+  heartbeat_init
+  while read line; do
+    heartbeat
+    echo "${line:0:1}" | grep '^[[:alpha:]]' >/dev/null || continue
+    left=$(echo "$line" | cut -d= -f1 | dd conv=lcase 2>/dev/null)
+    right=$(echo "$line" | cut -d= -f2-)
+    test -z "$left" && continue
+    if test "$left" = "$lastleft"; then
+      lastright="$lastright$right"
+    else
+      test "$lastleft" && echo "$lastleft=$lastright" >>"$3"
+      lastleft="$left"
+      lastright="$right"
+      dirty=yes
+    fi
+  done <"$2"
+  test "$dirty" = yes && echo "$lastleft=$lastright" >>"$3"
+}

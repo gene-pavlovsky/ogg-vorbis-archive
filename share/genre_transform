@@ -1,0 +1,14 @@
+s/^acid.*jazz$/acid jazz/
+s/^club.*house$/club house/
+s/^deep.*house$/deep house/
+s/^drum.*bass$/drum\&bass/
+s/^goa.*trance$/goa/
+s/^hip.*hop$/hip-hop/
+s/^jazz.*funk$/jazz-funk/
+s/^jazz.*fusion$/fusion/
+s/^lo.*fi$/lo-fi/
+s/^new.*age$/new age/
+s/^prog.*rock$/progressive rock/
+s/^prog.*trance$/progressive trance/
+s/^psy.*$/psychedelic/
+s/^trip.*hop$/trip-hop/

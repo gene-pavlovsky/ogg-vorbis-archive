@@ -1,0 +1,592 @@
+OVA (Ogg Vorbis Archive)
+Originally hosted on http://ova.sourceforge.net
+Author: Gene Pavlovsky <gene.pavlovsky@gmail.com>
+
+1. Introduction
+
+Helps to maintain an archive of music in the Ogg Vorbis format.
+
+Main features:
+
+  * CD ripping (front-end to cdparanoia)
+  * MP3/wave -> Ogg Vorbis encoding (front-end to oggenc and mplayer for MP3s)
+  * CDDB querying
+        o given a CD (or saved CD discid)
+        o given a bunch of MP3/Ogg Vorbis/wave files (very useful for downloaded albums)
+  * identify albums/tracks interface
+        o getting tracks' information (artist, album, titles etc.) from CDDB or
+              + pathnames (using elaborate and customizable sed patterns)
+              + tags (for MP3/Ogg Vorbis)
+        o manual editing of tracks' information
+              + interactive
+              + in your favorite editor
+        o saving the final information
+  * tag&relocate tracks interface
+        o tagging Ogg Vorbis files with the saved information
+        o renaming and moving them according to elaborate and customizable shell function
+        o associated files/subdirectories (lyrics, covers etc.) are moved automatically
+  * vorbisgain (ReplayGain for Ogg Vorbis) support
+  * splitting single-file albums to separate tracks
+  * CDDB DTITLE database (requires local CDDB archive)
+        o slow REGEXP search
+        o creating of artist and album search indices
+        o fast leading substring search for artist/album using search indices
+
+2. Documentation
+
+2.1. Installation
+
+For the installation instructions and the list of required
+software, refer to the INSTALL file.
+
+2.2. Shell scripts
+
+Config files: 'global.conf' (used by all shell scripts)
+
+2.2.1. ova
+
+This is the main script, providing dialog-based interface to the most of
+the functionality.
+
+Apart from the usual '--help' and '--version', ova doesn't accept options.
+When run, ova will display the main menu with the list of available actions.
+When some action is completed or aborted, ova will return to the main menu.
+
+Actions:
+
+2.2.1.0. 0: split single-file albums
+
+In short:
+
+Some people rip CDs to single MP3/wave files. Knowing the album's
+CDDB category and discid, it's possible to split such files back to
+separate tracks.
+
+Notes:
+
+By default, all tracks longer than 'track_split_playlength' value
+in 'music.conf' are selected.
+
+2.2.1.1. 1: rip an audio compact disc
+
+Notes:
+
+'tracks to rip' prompt: enter the rip range
+
+A couple of examples should clarify the rip range format:
+
+tracks to rip: -
+  rip all tracks (missing endpoints mean the first and the last tracks)
+tracks to rip: -3 5-7 9 14-
+  rip tracks 1,2,3,5,7,9, and from track 14 to the last track
+
+Empty rip range tells ova to quit to the main menu.
+
+Features:
+
+- Doesn't rip tracks that are already fully ripped (or encoded).
+- Size, average speed and rip time display for previous track.
+- The cdparanoia progress display for current track (as-is).
+
+Misfeatures:
+
+- Elapsed time is only updated after each track, and I'm not
+motivated to improve it.
+
+2.2.1.2. 2: re/encode tracks to ogg
+
+In short:
+
+Encode all wave files found in 'selected directory' to Ogg Vorbis.
+Decode all MP3 files found in 'selected directory' to wave files,
+and encode them to Ogg Vorbis. Remove all source files on success.
+
+Notes:
+
+The number of simultaneous jobs can be changed in 'main.conf'.
+Various oggenc options (e.g., quality) can be changed in the
+'oggenc_set_flags' function in 'conv.conf'.
+
+Features:
+
+- Total progress, elapsed and estimated time display.
+Unfortunately, estimated time drifts quite a while when encoding
+a large number of tracks. This is due to the low precision with
+which total progress is calculated (due to shell limitations).
+- Per-job filename, status, progress, elapsed and estimated time display.
+- SIGQUIT (ctrl + '\') empties the queue. As soon as already running jobs
+will finish, encoding will stop.
+
+2.2.1.3: 3: identify whole albums
+
+In short:
+
+For each directory != 'misc' in 'selected directory', do the following:
+If the 'discid'/'discid~' file exists, query the CDDB using it, otherwise
+query the CDDB using files' play lengths. Allow the user to choose from
+the CDDB matches, or to manually enter the CDDB category and discid.
+If no CDDB entry is chosen, get information from tags and pathnames.
+Allow to further edit the information manually (interactively or in
+the editor). Save the final information to '.tag' files. The 'discid~'
+file is removed if present, the 'discid' is kept if present. If
+'cddb_submit_url' in 'cddb.conf' is set, save the CDDB entry for
+later submission.
+
+For all 'misc' directories ('misc' or 'genre/misc') in 'selected
+directory', get information from tags and pathnames. Allow to
+further edit the information manually. Save the final information
+to '.tag' files. The 'misc' directories keep completely sundry
+tracks. If you want to classify them by genre (per-genre 'misc'
+directories), do it by hand first, moving all same-genre tracks
+to separate directories (preferrably genre name). Afterwards,
+in ova:identify, when editing the information manually, you
+may set the genre if it was not auto-detected from directory.
+
+Notes:
+
+CDDB matches selection:
+  - 'm': Enter the CDDB category and discid manually.
+  - 'v': For the rare cases of 'various artists' misdetection, toggle
+    it to force 'yes' or 'no' (or return to the default 'auto').
+
+Tags and pathnames guesswork (appears if the CDDB step was unsuccessful):
+  - '3': Attempt to match pathnames with patterns from 'pathname_patterns'
+    array set in 'music.conf'. Patterns are tried best-to-worst. At any
+    rate, the pattern can be specified manually.
+
+Manual adjustments:
+  - '3': Edit the current info in your editor of choice. The editor is
+    selected by setting the 'EDITOR' environment variable. Current info
+    is dumped into a temporary file in the form of a shell script, and
+    is executed as a shell script after editing; if any interpretation
+    errors occur, the error message is displayed, but some part of this
+    erroneous script is probably already evaluated. If in doubt, better
+    restart identifying this directory from scratch.
+  - '4': Swap trackartist with trackalbum for each track. Useful for
+    CDDB entries in which some dimwit mixed them up.
+  - '5': Convert all info from the selected character set. Useful to
+    convert info obtained from tags that are not in your locale's
+    encoding. Also may be useful for info read from CDDB: freedb now
+    endorses UTF-8, but in case you encounter entries in other encodings,
+    choose the right encoding (i.e., cp1251) and the information will
+    be converted from it.
+
+The 'album' and 'disc#' prompt: The album name is automatically scanned
+for something like '(cd1)' or '[disc 2]', but it can't be 100% sure,
+so it's necessary to allow the user to enter (or remove misdetected)
+'disc#' manually (and edit the 'album' accordingly).
+
+2.2.1.4. 4: tag&relocate tracks
+
+In short:
+
+For each directory != 'misc' in 'selected directory', do the following:
+Tag all Ogg Vorbis files for which the '.tag' files were found.
+Relocate these Ogg Vorbis files according to the name produced by the
+'track_path_pattern' function in 'music.conf'. Remove '.tag' files.
+If all Ogg Vorbis files were moved to the same directory, move all
+files and directories without Ogg Vorbis files from the source directory
+to the target directory. Also, if the parent of the source directory
+(and it's children) doesn't contain any Ogg Vorbis files, move
+everything from there to the parent of the target directory. Remove
+the empty directories left (if any).
+
+For all 'misc' directories ('misc' or 'genre/misc') in 'selected
+directory', tag all Ogg Vorbis files for which the '.tag' files were
+found. Relocate these Ogg Vorbis files according to the name produced
+by the 'track_path_pattern' function in 'music.conf'. Remove '.tag'
+files. Remove the empty directories left (if any).
+
+2.2.1.5. h: update hard links
+
+In short:
+
+Front-end to "ova-hardlink -a", with progress, elapsed/estimated/total
+times and last processed files/directories display. For information
+on ova-hardlink, see 2.2.11. Don't miss it, it's cool stuff (IMAO).
+
+2.2.1.6. v: calculate replay gain
+
+In short:
+
+For each directory != 'misc' in 'music root' except the 'incoming
+directory', do the following:
+For all Ogg Vorbis files without REPLAYGAIN comments, calculate
+and save track and album replay gain values (vorbisgain -f -a).
+
+For all 'misc' directories in 'music root' except the 'incoming
+directory', do the following:
+For all Ogg Vorbis files without REPLAYGAIN comments, calculate
+and save track replay gain values (vorbisgain -f).
+
+2.2.1.7. s: CDDB submit
+
+In short:
+
+Submit the pending CDDB entries.
+
+Notes:
+
+For the CDDB server to accept your submissions, you should set
+'cddb_submit_user_email' in 'cddb.conf' to a valid e-mail address.
+
+The CDDB submit is performed via HTTP, using wget.
+If you want to use HTTP proxy, configure wget to do so
+(e.g., set http_proxy in wgetrc config file).
+
+2.2.1.8. cs: cleanup stale files
+
+In short:
+
+Remove error files and unfinished Ogg Vorbis/wave files left
+after unclean 'encode' termination.
+Remove all error log files but the current.
+
+2.2.1.9. cc: cleanup CDDB cache
+
+In short:
+
+Remove locally cached CDDB entries.
+
+2.2.1.10. cd: cleanup discid list
+
+In short:
+
+Remove the list of ripped CDs' discids.
+
+Notes:
+
+This list is used for checking if the CD had already been ripped.
+
+Only do it if your discid list becomes stale, because it's not very fast
+to generate a new list (which will happen upon the next CD rip).
+
+2.2.1.11. i: information
+
+In short:
+
+Display the size of the local CDDB cache, and the number of
+the pending CDDB submissions.
+
+2.2.1.12. Compound actions
+
+There're several compound actions available.
+  - 12: run 1, 2 in sequence
+  - 1234: run 1, 2, 3, 4 in sequence
+  - 234: run 2, 3, 4 in sequence
+  - 34: run 3, 4 in sequence
+
+Also, all compound actions ending with '4' may be appended with 'v'
+which means ReplayGain (vorbisgain) calculation. The '4v' compound
+action is also acceptable.
+
+2.2.1.13. Notes
+
+NB: Before re/encoding your entire music collection, be sure that you
+have splitted all the single-MP3/wave albums to separate tracks.
+
+Signals: the INT, TERM, HUP and QUIT signals are blocked most of the
+time. During lengthy actions like encoding or ripping, the INT signal
+is handled as rather-clean interrupt.
+
+Config files: 'music.conf', 'cddb.conf', 'main.conf'
+
+2.2.2. ova-cddb_ibuild, ova-cddb_isearch
+
+These scripts allow to build and search the CDDB DTITLE database and
+search indices. To build this database you need a complete copy of CDDB.
+If you have it installed under '/usr/media/freedb', the following command
+will build the database itself and the search indices:
+
+ova-cddb_ibuild --save-db /usr/media/freedb
+
+You can also do it this way:
+
+ova-cddb_ibuild --save-db --no-indices /usr/media/freedb
+ova-cddb_ibuild --load-db
+
+For Nov 2003 freedb database, it took ~220 minutes on my Athlon-1400,
+with ReiserFS filesystem (mounted loopback) on Seagate 7200.7 HDD.
+
+I've implemented the 'resume' feature in ova-cddb_ibuild allowing
+to interrupt the indices creation process at any time and to continue
+it later, but, due to apparent bug(s) in handling signals in bash,
+I had to disable this feature. The bug manifests itself as the code
+assigned to handle signals doesn't get executed from time to time.
+The same problem sometimes occurs when interrupting ova actions.
+Also, sometimes currently evaluating shell/subshell expressions or
+running child processes (e.g., mplayer/oggenc when encoding) receive
+the signal, potentially leading to very bad consequences.
+
+The ova-cddb_isearch script allows to grep through the DTITLE
+database for any REGEXP (it's slow, though) using '--dtitle' option,
+or to search for the leading substring of artist/album using
+'--artist'/'--album' options, with optional secondary matching using
+'--with-album'/'--with-artist' options.
+
+Config files: 'cddb.conf'
+
+2.2.3. ova-cddb_match
+
+This script reads a list of CDDB entries from the standard input,
+optionally matches them by several criteria, and display the disc
+title, disc length, tracknumber, and, if given '--print-info' option,
+the track title list. Matching criteria can be specified as options
+('--length', '--tracks', '--ttitle'), or given a directory or file.
+If a directory is given, length is matched to all it's tracks length,
+track count is matched to it's track count. If a file is given,
+length is matched to it's length, track count is matched to 1. To
+disable matching some of the criteria, use '--length'/'--tracks'
+options with empty argument. Very useful in conjunction with
+ova-cddb_isearch (e.g., when you know the artist but don't
+know the album, and the tracks are not numbered).
+
+Example:
+
+ova-cddb_isearch --artist=nightwish --with-album=oceanborn |
+  ova-cddb_match /usr/media/music/incoming/rock/nightwish/oceanborn
+
+The tracks in this album only had titles, so it wasn't possible to
+do a CDDB query using their play lengths. The ova-cddb_isearch
+with the aforementioned options returns 23 results (many albums
+are released in different versions for various countries, with
+different number and/or ordering of tracks sometimes; there are
+live versions etc.) which is too much. After ova-cddb_match
+there are only five CDDB entries left (sorted out by disc length
+and tracks count) which is quite ok.
+
+Config files: 'cddb.conf'
+
+2.2.4. ova-cddb_number
+
+This script takes further the example from the previous script.
+Being passed the CDDB entry (category and discid) on the command line,
+as well as the directory, it attempts to match (quite fuzzy) track
+titles read from the CDDB with the names of files in this directory,
+and for successful matches, renames the files by prepending track
+numbers to them.
+
+Example:
+
+ova-cddb_number rock 8a0c740b /usr/media/music/incoming/rock/nightwish/oceanborn
+
+The '--dry-run'/'-n' option allows to preview what would have been
+done before actually doing it. The CDDB category and discid were
+taken from the best match from the previous example (best by the
+terms of disc length difference).
+
+Config files: 'cddb.conf'
+
+2.2.5. ova-cddb_query, ova-cddb_read
+
+These two scripts do a CDDB query and a CDDB read, respectively.
+The ova-cddb_query script allows quite a wide variety of input
+to construct it's query. It can be given a file named 'discid' or
+'discid~' which should contain the CD discid in cddb protocol
+'cddb query' command format. It can be given a list of files from
+play lengths of which to compute the discid. Finally, it can be
+given a list of track frame offsets from which to compute the discid.
+The ova-cddb_read just reads the given CDDB entry.
+Both scripts can print the full discid, the list of track frame
+offsets, the disc length and the track count ('-d', '-o', '-l'
+and '-t' options, respectively).
+
+Examples:
+
+ova-cddb_query /usr/media/music/incoming/cdda/0001/discid
+ova-cddb_query unknown_album1/*mp3
+find unknown_album2 -maxdepth 1 -type f | sort | ova-cddb_query --filelist=-
+ova-cddb_read newage a3112c0d
+
+Notes:
+
+The CDDB query/read is performed via HTTP, using wget.
+If you want to use HTTP proxy, configure wget to do so
+(e.g., set http_proxy in wgetrc config file).
+
+Config files: 'cddb.conf'
+
+2.2.6. ova-conv
+
+This script converts MP3/wave file to Ogg Vorbis file, using
+mplayer and oggenc. It also validates play lengths after each
+conversion step (they shouldn't change for more than the value
+of 'encdec_deviation' in 'global.conf').
+Not very useful by itself, it's the primary worker inside
+ova in encode action.
+
+Config files: 'conv.conf'
+
+2.2.7. ova-gettag
+
+This script creates a '.tag~' file for a given file.
+Not very useful by itself, it's heavily used inside ova
+here and there.
+
+Config files: 'music.conf'
+
+2.2.8. ova-lint
+
+This script searches for missing tracks in the middle of albums
+(e.g., if album has tracks 1,2,3 and 6,7,9, it'll report that
+tracks 4-5 and 8 are missing). Unless '--no-tags' option is
+specified, it'll also check for files that miss some tag info.
+
+Notes:
+
+It works best on already identified, tagged&relocated tracks.
+As it's designed exactly for this, you probably shouldn't use it
+on non-ova'd tracks (e.g., ones in $music_incoming).
+
+Config files: 'music.conf'
+
+2.2.9. ova-cue2offsets
+
+This script reads a given cue sheet, and outputs track frame offsets
+file suitable for input into tracksplit.
+
+2.2.10. ova-sed
+
+Reads a given .ogg files' comments (tags), processes them with sed
+(sed's "-e SCRIPT", "-f FILE" and "-r" options are available), and
+then saves the resulting comments back to the file. New comments
+can be added with "-a COMMENT" option. The script also tries to
+apply sed script(s) to filename, if it's changed, move the old file
+to the new filename. Combined with a little shell scripting, ova-sed
+allows to quickly change, for example, the genre of multiple .ogg
+files.
+
+2.2.11. ova-hardlink
+
+Makes hard links for a given album (processes all albums with "-a" option),
+according to hardlink.conf. This allows to have several different paths to
+music files while using little additional disk space.
+
+The default setup creates these hard links:
+  by album
+    /usr/media/music-by/album/ak_note/akiko_kohara/2003-ak_note
+  by artist
+    /usr/media/music-by/artist/akiko_kohara/2003-ak_note
+  by date
+    /usr/media/music-by/2003/akiko_kohara/2003-ak_note
+  by date and genre
+    /usr/media/music-by/2003/acid_jazz/akiko_kohara/2003-ak_note
+  by genre and date
+    /usr/media/music-by/acid_jazz/2003/akiko_kohara/2003-ak_note
+  by the most recently modified file's modification time
+    /usr/media/music-by/mtime_y/2004/acid_jazz/akiko_kohara/2003-ak_note
+    /usr/media/music-by/mtime_ym/200410/acid_jazz/akiko_kohara/2003-ak_note
+    /usr/media/music-by/mtime_ymd/20041023/acid_jazz/akiko_kohara/2003-ak_note
+    /usr/media/music-by/mtime_y_m/2004/10_october/acid_jazz/akiko_kohara/2003-ak_note
+    /usr/media/music-by/mtime_y_m_d/2004/10_october/23_saturday/acid_jazz/akiko_kohara/2003-ak_note
+
+This gives a very useful way to find albums in the music archive. For example,
+"by genre and date" links can be used to see what progressive rock albums have
+been released in 1979; "by artist" links can be used to see all of the artist's
+albums even if he/she have released albums in several genres; "by mtime" links
+can be used to see the albums in the order they were added to the music archive
+(this is very useful to see the latest additions to the music archive).
+
+Config files: 'music.conf', 'hardlink.conf'
+
+2.3. C programs
+
+Unfortunately, some features not provided by shell had to
+be implemented in C.
+
+2.3.1. cr2lf, lf0
+
+Text filters. Change CRs to LFs, LFs to NULs respectively.
+
+2.3.2. gettimeofday, isatty, nanosleep
+
+The gettimeofday(2), isatty(3), nanosleep(2) shell counterparts (respectively).
+
+2.3.3. readdef
+
+Similar to bash's 'read -e', with a few extras.
+Also uses the readline library.
+Allows to supply a default value and edit history.
+
+2.3.4. tracksplit
+
+Splits a raw audio file to several wave audio files as
+specified by offsets in the offsets file.
+
+2.3.5. cdbgetall
+
+Prints all records with a given key found in a constant database.
+The 'constant database' here pertains to Dan Bernstein's cdb software.
+The cdbgetall itself is derived from cdbget from cdb-0.75.
+
+2.4. Configuration files
+
+The most of the ova programs can be more or less configured.
+The config files are shell scripts, and are interpreted at start-up.
+Options are documented in config files themselves.
+
+2.5. General notes
+
+The proposed initial use of ova is the following:
+  [if you don't have/want to use vorbisgain, remove 'v' from compound actions]
+
+  - move all your music to $music_incoming (default: /usr/media/music/incoming)
+  - split all single-file albums to separate tracks using ova action '0'
+
+  - re/encode all tracks to Ogg Vorbis using ova action '2'
+  - identify Ogg Vorbis tracks using ova action '3'
+  - tag&relocate Ogg Vorbis tracks using ova compound action '4v'
+  [optionally, do it using ova compound action '234v']
+
+  - run ova-lint on your $music_home to check tags / find incomplete albums
+
+At this point, your $music_incoming should become empty, and your
+music archive should become very nicely classified.
+Actually, you may also need to do the following:
+
+  - for each non-MP3 single-file album (FLAC, APE, MPC etc.), decode it to cd-quality
+      raw file (no wave header) using your favorite software
+      example for ape:
+        mac 1.ape 1.wav && mplayer 1.wav -ao pcm:nowaveheader:file=1.raw </dev/null && rm 1.ape 1.wav
+    then use tracksplit to split the raw file to individual wave files
+      example:
+        ova-cue2offsets 1.cue >offsets && tracksplit 1.raw offsets . && rm 1.raw
+      example:
+        ova-cddb_read blues 330dce14 -o >offsets && tracksplit 1.raw offsets . && rm 1.raw
+  - decode non-MP3 albums (FLAC, APE, MPC etc.), to wave files
+      example for mpc:
+        for i in *.mpc; do mppdec "$i" $(echo "$i" | sed 's/\.mpc$/.wav/') && rm "$i"; done
+  - run ova action '234'/'234v' again
+
+The proposed further use of ova is the following:
+
+  - rip new CDs using ova compound action '1234v'.
+  - split new single-file albums to separate tracks using ova action '0'
+  - process new MP3/wave albums using ova compound action '234v'
+
+  - run ova-lint on your $music_home to check tags / find incomplete albums
+
+Advanced features:
+
+  - use ova action 'h' (or ova-hardlink script) to make hard links for your
+      albums, this will make them accessible via different paths, making
+      it easy to find albums in the music archive
+
+You are also encouraged to make submissions to the CDDB (freedb) by
+using ova action 's' (the number of entries pending for submission
+can be viewed using ova action 'i').
+
+2.6. Reporting bugs / Sending patches / Requesting enhancements
+
+If you think you've found a bug, written a patch or want a new
+feature badly, feel free to mail me (see the head of this file).
+Be sure to set the subject to 'ova: bugreport: blah blah blah',
+'ova: patch: blah blah blah' or 'ova: rfe: blah blah blah'
+for bugreport, patch or RFE respectively.
+When writing bugreports, please include as much information as
+possible. It's also imperative that you set 'enable_debug' in
+'global.conf' to yes, reproduce your bug and check non-empty files
+in 'log/error' subdirectory in ova's datadir (by default it's
+/usr/local/share/ova) - their contents might alone let you fix
+the bug. In any case, send these error log files along with the list
+of commands/actions you've done that produced these error log files.
